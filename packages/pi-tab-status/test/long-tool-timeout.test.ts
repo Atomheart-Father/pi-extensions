@@ -151,6 +151,43 @@ test("an aborted run does not leave in-flight state behind for the next run", as
   }
 });
 
+test("a tool left in flight by a failed run is not carried into the retry", async () => {
+  const { ctx, titles, emit, advance, restore } = createHarness();
+  try {
+    await emit("agent_start");
+    await emit("tool_execution_start", silentToolStart("t1"));
+    // A run that fails while a tool is executing reports the end of the run
+    // without ever reporting the end of that tool. Its id can never be cleared
+    // by a later end event, so the retry must not inherit it.
+    await emit("agent_end", { messages: [{ role: "assistant", stopReason: "error" }] });
+    await emit("agent_start");
+    advance(180_000);
+    assert.equal(titles.at(-1), formatTabTitle(ctx.cwd, "timeout"), "the retry has no in-flight tool");
+  } finally {
+    await emit("session_shutdown");
+    restore();
+  }
+});
+
+test("a tool that ends normally after a retry still holds the running title", async () => {
+  const { ctx, titles, emit, advance, restore } = createHarness();
+  try {
+    await emit("agent_start");
+    await emit("tool_execution_start", silentToolStart("stale"));
+    await emit("agent_end", { messages: [{ role: "assistant", stopReason: "error" }] });
+    await emit("agent_start");
+    await emit("tool_execution_start", silentToolStart("retry-tool"));
+    advance(180_000);
+    assert.equal(titles.at(-1), formatTabTitle(ctx.cwd, "running"), "the live tool is still in flight");
+    await emit("tool_execution_end", toolEnd("retry-tool"));
+    advance(180_000);
+    assert.equal(titles.at(-1), formatTabTitle(ctx.cwd, "timeout"));
+  } finally {
+    await emit("session_shutdown");
+    restore();
+  }
+});
+
 test("sequential long tools each hold the running title while they execute", async () => {
   const { ctx, titles, emit, advance, restore } = createHarness();
   try {

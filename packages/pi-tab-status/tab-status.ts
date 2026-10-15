@@ -260,6 +260,12 @@ export default function (pi: ExtensionAPI) {
   pi.on("session_info_changed", async (_event, ctx) => setTitle(ctx, status.state));
   pi.on("agent_end", async (event: AgentEndEvent) => {
     finalStopReason = getStopReason(event.messages);
+    // No tool can still be executing here: the agent finishes its tool batch
+    // before it reports the run's end, and a failed or aborted run reports that
+    // end without the in-flight tool's own end event. Such an id can therefore
+    // never be cleared later, and a retry reusing this tracker would stay
+    // running forever.
+    activeToolCallIds.clear();
   });
   const settle = (ctx: ExtensionContext, owner: number): void => {
     if (owner !== generation) return;
